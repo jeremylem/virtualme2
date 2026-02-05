@@ -1,5 +1,5 @@
 """RAG (Retrieval Augmented Generation) package for Virtual Me chatbot."""
 
-from .pipeline import run_rag_pipeline
+from .bedrock_rag import retrieve_and_generate
 
-__all__ = ['run_rag_pipeline']
+__all__ = ['retrieve_and_generate']

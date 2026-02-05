@@ -221,14 +221,9 @@ src/knowledge_base/
 # Claude Code configuration
 .claude/
 
-# Terraform
-terraform/.terraform/
-terraform/.terraform.lock.hcl
-terraform/terraform.tfstate
-terraform/terraform.tfstate.backup
-terraform/*.tfvars
-!terraform/terraform.tfvars.example
-terraform/tfplan
+# AWS SAM
+.aws-sam/
+sam/.aws-sam/
 
 # LocalStack
 volume/

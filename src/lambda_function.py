@@ -8,7 +8,7 @@ import json
 from typing import Dict, Any
 from pydantic import ValidationError
 
-from rag.pipeline import run_rag_pipeline
+from rag.bedrock_rag import retrieve_and_generate
 from utils.http import http_response
 from utils.logging import get_logger
 from models.requests import ChatRequest, ErrorResponse
@@ -63,11 +63,11 @@ def get_meta_response() -> str:
     """
     return (
         "I'm Virtual Me, a RAG-powered chatbot representing Jeremy Lemaire. "
-        "I'm built with AWS Lambda, DynamoDB vector store, LangGraph orchestration, "
-        "and Amazon Bedrock (Nova 2 Lite model). When you ask a question, I retrieve "
-        "relevant sections from Jeremy's resume using semantic search, then generate "
-        "grounded responses to prevent hallucinations. The full technical breakdown "
-        "is in Jeremy's blog post about this project."
+        "I'm built with AWS Lambda, S3 Vectors, Bedrock Knowledge Base, "
+        "and Amazon Bedrock (Nova 2 Lite model). When you ask a question, "
+        "Bedrock retrieves relevant sections from Jeremy's resume using semantic search, "
+        "then I generate grounded responses to prevent hallucinations. The full technical "
+        "breakdown is in Jeremy's blog post about this project."
     )
 
 
@@ -137,8 +137,8 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
                     )
                     return http_response(503, error_response.model_dump())
 
-            # Run the RAG pipeline
-            answer = run_rag_pipeline(last_user_message)
+            # Run RAG: retrieve context and generate response
+            answer = retrieve_and_generate(last_user_message)
 
         logger.info("Generated answer (%d chars)", len(answer))
 

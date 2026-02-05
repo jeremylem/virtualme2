@@ -32,11 +32,6 @@ Parameters:
     Default: nova-2-lite
     Description: LLM model identifier for Bedrock
 
-  EmbeddingModel:
-    Type: String
-    Default: titan-embed-text-v2
-    Description: Embedding model identifier for Bedrock
-
   LlmTemperature:
     Type: String
     Default: '0.1'
@@ -94,9 +89,7 @@ Resources:
           LLM_BACKEND: bedrock
           LLM_MODEL: !Ref LlmModel
           LLM_TEMPERATURE: !Ref LlmTemperature
-          EMBEDDING_BACKEND: bedrock
-          EMBEDDING_MODEL: !Ref EmbeddingModel
-          DYNAMODB_TABLE: !Ref VectorTable
+          KNOWLEDGE_BASE_ID: !Ref KnowledgeBase
       Policies:
         - Version: '2012-10-17'
           Statement:
@@ -117,13 +110,9 @@ Resources:
                 - !Sub arn:aws:bedrock:${AWS::Region}:${AWS::AccountId}:inference-profile/*
             - Effect: Allow
               Action:
-                - dynamodb:PutItem
-                - dynamodb:GetItem
-                - dynamodb:Scan
-                - dynamodb:Query
-                - dynamodb:BatchWriteItem
+                - bedrock:Retrieve
               Resource:
-                - !GetAtt VectorTable.Arn
+                - !GetAtt KnowledgeBase.KnowledgeBaseArn
             - Effect: Allow
               Action:
                 - xray:PutTraceSegments
@@ -213,28 +202,141 @@ Resources:
         HostedZoneId: !GetAtt ApiDomainName.RegionalHostedZoneId
 
   # ---------------------------------------------------------------------------
-  # DynamoDB Table
+  # S3 Knowledge Base Bucket
   # ---------------------------------------------------------------------------
-  VectorTable:
-    Type: AWS::DynamoDB::Table
+  KnowledgeBaseBucket:
+    Type: AWS::S3::Bucket
     Properties:
-      TableName: virtual-me-v2-vectors
-      BillingMode: PAY_PER_REQUEST
-      AttributeDefinitions:
-        - AttributeName: id
-          AttributeType: S
-      KeySchema:
-        - AttributeName: id
-          KeyType: HASH
-      PointInTimeRecoverySpecification:
-        PointInTimeRecoveryEnabled: true
+      BucketName: !Sub virtual-me-v2-kb-${Environment}-${AWS::AccountId}
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
       Tags:
         - Key: Project
           Value: VirtualMe
         - Key: Environment
           Value: !Ref Environment
-        - Key: Purpose
-          Value: Stores document embeddings for RAG
+
+  # ---------------------------------------------------------------------------
+  # S3 Vectors Bucket and Index
+  # ---------------------------------------------------------------------------
+  VectorBucket:
+    Type: AWS::S3Vectors::VectorBucket
+    Properties:
+      VectorBucketName: !Sub virtual-me-v2-vectors-${Environment}
+
+  VectorIndex:
+    Type: AWS::S3Vectors::Index
+    Properties:
+      VectorBucketArn: !GetAtt VectorBucket.VectorBucketArn
+      IndexName: virtual-me-v2-index
+      DataType: float32
+      Dimension: 1024
+      DistanceMetric: cosine
+      MetadataConfiguration:
+        NonFilterableMetadataKeys:
+          - AMAZON_BEDROCK_TEXT
+          - AMAZON_BEDROCK_METADATA
+
+  # ---------------------------------------------------------------------------
+  # Bedrock Knowledge Base IAM Role
+  # ---------------------------------------------------------------------------
+  BedrockKnowledgeBaseRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub virtual-me-v2-bedrock-kb-role-${Environment}
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: bedrock.amazonaws.com
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: S3Access
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - s3:GetObject
+                  - s3:ListBucket
+                Resource:
+                  - !GetAtt KnowledgeBaseBucket.Arn
+                  - !Sub ${KnowledgeBaseBucket.Arn}/*
+        - PolicyName: S3VectorsAccess
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - s3vectors:GetVectorBucket
+                  - s3vectors:ListIndexes
+                Resource: !GetAtt VectorBucket.VectorBucketArn
+              - Effect: Allow
+                Action:
+                  - s3vectors:GetIndex
+                  - s3vectors:GetVectors
+                  - s3vectors:ListVectors
+                  - s3vectors:PutVectors
+                  - s3vectors:QueryVectors
+                  - s3vectors:DeleteVectors
+                Resource: !GetAtt VectorIndex.IndexArn
+        - PolicyName: BedrockEmbeddings
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action: bedrock:InvokeModel
+                Resource: !Sub arn:aws:bedrock:${AWS::Region}::foundation-model/amazon.titan-embed-text-v2:0
+      Tags:
+        - Key: Project
+          Value: VirtualMe
+        - Key: Environment
+          Value: !Ref Environment
+
+  # ---------------------------------------------------------------------------
+  # Bedrock Knowledge Base
+  # ---------------------------------------------------------------------------
+  KnowledgeBase:
+    Type: AWS::Bedrock::KnowledgeBase
+    Properties:
+      Name: !Sub virtual-me-v2-kb-${Environment}
+      RoleArn: !GetAtt BedrockKnowledgeBaseRole.Arn
+      KnowledgeBaseConfiguration:
+        Type: VECTOR
+        VectorKnowledgeBaseConfiguration:
+          EmbeddingModelArn: !Sub arn:aws:bedrock:${AWS::Region}::foundation-model/amazon.titan-embed-text-v2:0
+      StorageConfiguration:
+        Type: S3_VECTORS
+        S3VectorsConfiguration:
+          IndexArn: !GetAtt VectorIndex.IndexArn
+      Tags:
+        Project: VirtualMe
+        Environment: !Ref Environment
+
+  # ---------------------------------------------------------------------------
+  # Bedrock Data Source
+  # ---------------------------------------------------------------------------
+  DataSource:
+    Type: AWS::Bedrock::DataSource
+    Properties:
+      KnowledgeBaseId: !Ref KnowledgeBase
+      Name: !Sub virtual-me-v2-resume-source-${Environment}
+      DataSourceConfiguration:
+        Type: S3
+        S3Configuration:
+          BucketArn: !GetAtt KnowledgeBaseBucket.Arn
+          InclusionPrefixes:
+            - knowledge_base/
+      VectorIngestionConfiguration:
+        ChunkingConfiguration:
+          ChunkingStrategy: FIXED_SIZE
+          FixedSizeChunkingConfiguration:
+            MaxTokens: 300
+            OverlapPercentage: 10
 
   # ---------------------------------------------------------------------------
   # S3 Frontend Bucket
@@ -517,14 +619,18 @@ Outputs:
     Description: CloudFront domain name
     Value: !GetAtt CloudFrontDistribution.DomainName
 
-  # DynamoDB
-  DynamoDBTableName:
-    Description: DynamoDB table name for vectors
-    Value: !Ref VectorTable
+  # Knowledge Base
+  KnowledgeBaseId:
+    Description: Bedrock Knowledge Base ID
+    Value: !Ref KnowledgeBase
 
-  DynamoDBTableArn:
-    Description: DynamoDB table ARN
-    Value: !GetAtt VectorTable.Arn
+  KnowledgeBaseBucketName:
+    Description: S3 bucket for knowledge base documents
+    Value: !Ref KnowledgeBaseBucket
+
+  DataSourceId:
+    Description: Bedrock Data Source ID
+    Value: !Ref DataSource
 
   # Monitoring
   SNSTopicArn:

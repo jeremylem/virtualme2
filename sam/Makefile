@@ -1,4 +1,4 @@
-.PHONY: build deploy deploy-frontend deploy-all validate logs logs-api clean delete help
+.PHONY: build deploy deploy-frontend deploy-all validate logs logs-api clean delete help upload-kb start-ingestion ingest ingestion-status
 
 # Default target
 help:
@@ -13,6 +13,12 @@ help:
 	@echo "  make logs-api        - Tail API Gateway logs"
 	@echo "  make clean           - Remove build artifacts"
 	@echo "  make delete          - Delete the entire SAM stack"
+	@echo ""
+	@echo "Knowledge Base:"
+	@echo "  make upload-kb       - Upload knowledge base files to S3"
+	@echo "  make start-ingestion - Start Bedrock KB ingestion job"
+	@echo "  make ingest          - Upload KB and trigger ingestion"
+	@echo "  make ingestion-status - Check ingestion job status"
 	@echo ""
 
 # Build Lambda function using container for consistent Linux binaries
@@ -69,3 +75,27 @@ status:
 		--stack-name virtual-me-v2 \
 		--query 'Stacks[0].StackStatus' \
 		--output text
+
+# Upload knowledge base files to S3
+upload-kb:
+	@KB_BUCKET=$$(aws cloudformation describe-stacks --stack-name virtual-me-v2 --query 'Stacks[0].Outputs[?OutputKey==`KnowledgeBaseBucketName`].OutputValue' --output text) && \
+	echo "Uploading to s3://$$KB_BUCKET/knowledge_base/" && \
+	aws s3 sync ../knowledge_base/ s3://$$KB_BUCKET/knowledge_base/
+
+# Start Bedrock Knowledge Base ingestion job
+start-ingestion:
+	@KB_ID=$$(aws cloudformation describe-stacks --stack-name virtual-me-v2 --query 'Stacks[0].Outputs[?OutputKey==`KnowledgeBaseId`].OutputValue' --output text) && \
+	DS_COMPOSITE=$$(aws cloudformation describe-stacks --stack-name virtual-me-v2 --query 'Stacks[0].Outputs[?OutputKey==`DataSourceId`].OutputValue' --output text) && \
+	DS_ID=$${DS_COMPOSITE##*|} && \
+	echo "Starting ingestion for KB: $$KB_ID, DataSource: $$DS_ID" && \
+	aws bedrock-agent start-ingestion-job --knowledge-base-id $$KB_ID --data-source-id $$DS_ID
+
+# Upload KB and trigger ingestion
+ingest: upload-kb start-ingestion
+
+# Check ingestion job status
+ingestion-status:
+	@KB_ID=$$(aws cloudformation describe-stacks --stack-name virtual-me-v2 --query 'Stacks[0].Outputs[?OutputKey==`KnowledgeBaseId`].OutputValue' --output text) && \
+	DS_COMPOSITE=$$(aws cloudformation describe-stacks --stack-name virtual-me-v2 --query 'Stacks[0].Outputs[?OutputKey==`DataSourceId`].OutputValue' --output text) && \
+	DS_ID=$${DS_COMPOSITE##*|} && \
+	aws bedrock-agent list-ingestion-jobs --knowledge-base-id $$KB_ID --data-source-id $$DS_ID --query 'ingestionJobSummaries[0]' --output table
