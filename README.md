@@ -137,22 +137,21 @@ CONTEXT:
 ## Quick Start (Local Development)
 
 ### Prerequisites
-- Python 3.11+
-- AWS SAM CLI
-- AWS credentials (for Bedrock)
+- Swift 6.0+
+- AWS credentials configured (for Bedrock)
 
 ### Setup
 
 ```bash
-# Clone and setup
+# Clone the repo
 git clone <repo-url> && cd virtualme2
-python3 -m venv venv && source venv/bin/activate
-pip install -r requirements.txt
 
-# Run locally with SAM
+# Run locally
 cd sam
-sam local start-api
+make run-local
 ```
+
+This starts the Swift Lambda locally with environment variables set. The Lambda will connect to your actual Bedrock Knowledge Base in AWS.
 
 ---
 
@@ -186,15 +185,12 @@ make deploy
 ### Local Testing
 
 ```bash
-# Start API Gateway locally
+# Run Lambda locally (connects to real Bedrock KB)
 cd sam
-sam local start-api
+make run-local
 
-# Test a specific function
-sam local invoke VirtualMeLambda -e events/test-event.json
-
-# Or use the Makefile
-make local
+# Test with sample request (in another terminal)
+make test-local
 ```
 
 ### Useful Commands
@@ -204,11 +200,9 @@ make local
 sam validate
 
 # View logs
-sam logs -n VirtualMeLambda --tail
-
-# Or use Makefile shortcuts
 make logs          # Lambda logs
 make logs-api      # API Gateway logs
+make cold-start-metrics  # Cold start statistics
 
 # Deploy frontend
 make deploy-frontend

@@ -30,7 +30,7 @@ build:
 
 # Run Lambda locally for development
 run-local:
-	cd ../swift && KNOWLEDGE_BASE_ID=PMWGLLCEHL LLM_MODEL=nova-2-lite LLM_TEMPERATURE=0.1 swift run
+	cd ../swift && KNOWLEDGE_BASE_ID=RPXCA7UUQN LLM_MODEL=nova-2-lite LLM_TEMPERATURE=0.1 swift run
 
 # Test local Lambda with sample request (run-local must be running)
 test-local:
