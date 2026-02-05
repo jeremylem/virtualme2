@@ -15,19 +15,19 @@ region = "eu-west-3"
 confirm_changeset = true
 capabilities = "CAPABILITY_IAM CAPABILITY_NAMED_IAM CAPABILITY_AUTO_EXPAND"
 # Update these values before deploying:
-# - Route53ZoneId: Your Route53 hosted zone ID for lemaire.tel
-# - ApiCertificateArn: ACM certificate ARN in eu-west-3 for api2.lemaire.tel
-# - CloudFrontCertificateArn: ACM certificate ARN in us-east-1 for chat2.lemaire.tel
+# - Route53ZoneId: Your Route53 hosted zone ID for your domain
+# - ApiCertificateArn: ACM certificate ARN in your region for API subdomain
+# - CloudFrontCertificateArn: ACM certificate ARN in us-east-1 for CloudFront
 parameter_overrides = [
     "Environment=prod",
-    "DomainName=lemaire.tel",
+    "DomainName=example.com",
     "FrontendSubdomain=chat",
     "ApiSubdomain=api",
     "LlmModel=nova-2-lite",
     "LlmTemperature=0.1",
-    "Route53ZoneId=Z042219115MNG2VU6NRK9",
-    "ApiCertificateArn=arn:aws:acm:eu-west-3:298290307734:certificate/a98b706d-bf23-480a-a888-8417ccfcc162",
-    "CloudFrontCertificateArn=arn:aws:acm:us-east-1:298290307734:certificate/df68292c-240f-4e8b-a75b-c4cad28b6eb9",
+    "Route53ZoneId=ZXXXXXXXXXXXXX",
+    "ApiCertificateArn=arn:aws:acm:eu-west-3:123456789012:certificate/xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx",
+    "CloudFrontCertificateArn=arn:aws:acm:us-east-1:123456789012:certificate/xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx",
 ]
 s3_prefix = "virtual-me-v2"
 resolve_s3 = true
