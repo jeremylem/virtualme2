@@ -67,7 +67,7 @@ make cold-start-metrics
 
 ## Architecture
 
-![RAG Chatbot Architecture](architecture.png)
+![RAG Chatbot Architecture](rag_chatbot_architecture.png)
 
 > [!NOTE]
 > The diagram above is generated using the [Diagrams](https://diagrams.mingrammer.com/) library via the `rag_chatbot_architecture.py` script.
