@@ -1,0 +1,45 @@
+version = 0.1
+
+[default]
+[default.global.parameters]
+stack_name = "virtual-me-v2"
+
+[default.build.parameters]
+cached = true
+parallel = true
+use_container = true
+
+[default.deploy.parameters]
+stack_name = "virtual-me-v2"
+region = "eu-west-3"
+confirm_changeset = true
+capabilities = "CAPABILITY_IAM CAPABILITY_AUTO_EXPAND"
+# Update these values before deploying:
+# - Route53ZoneId: Your Route53 hosted zone ID for lemaire.tel
+# - ApiCertificateArn: ACM certificate ARN in eu-west-3 for api2.lemaire.tel
+# - CloudFrontCertificateArn: ACM certificate ARN in us-east-1 for chat2.lemaire.tel
+parameter_overrides = [
+    "Environment=prod",
+    "DomainName=lemaire.tel",
+    "FrontendSubdomain=chat2",
+    "ApiSubdomain=api2",
+    "LlmModel=nova-2-lite",
+    "EmbeddingModel=titan-embed-text-v2",
+    "LlmTemperature=0.1",
+    "Route53ZoneId=Z042219115MNG2VU6NRK9",
+    "ApiCertificateArn=arn:aws:acm:eu-west-3:298290307734:certificate/47d1a074-f5a8-429f-a813-87db44d71217",
+    "CloudFrontCertificateArn=arn:aws:acm:us-east-1:298290307734:certificate/855ac7bf-da8a-45d1-b0fe-609e319b8fbe",
+]
+s3_prefix = "virtual-me-v2"
+resolve_s3 = true
+disable_rollback = false
+tags = "Project=\"VirtualMe\" Environment=\"prod\" ManagedBy=\"SAM\""
+
+[default.validate.parameters]
+lint = true
+
+[default.sync.parameters]
+watch = true
+
+[default.logs.parameters]
+stack_name = "virtual-me-v2"

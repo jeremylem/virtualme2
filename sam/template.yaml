@@ -1,0 +1,532 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Transform: AWS::Serverless-2016-10-31
+Description: Virtual Me v2 Chatbot - SAM Deployment
+
+# -----------------------------------------------------------------------------
+# Parameters
+# -----------------------------------------------------------------------------
+Parameters:
+  Environment:
+    Type: String
+    Default: prod
+    AllowedValues: [dev, staging, prod]
+    Description: Environment name
+
+  DomainName:
+    Type: String
+    Default: lemaire.tel
+    Description: Root domain name
+
+  FrontendSubdomain:
+    Type: String
+    Default: chat2
+    Description: Subdomain for frontend
+
+  ApiSubdomain:
+    Type: String
+    Default: api2
+    Description: Subdomain for API
+
+  LlmModel:
+    Type: String
+    Default: nova-2-lite
+    Description: LLM model identifier for Bedrock
+
+  EmbeddingModel:
+    Type: String
+    Default: titan-embed-text-v2
+    Description: Embedding model identifier for Bedrock
+
+  LlmTemperature:
+    Type: String
+    Default: '0.1'
+    Description: LLM temperature (0.0-1.0)
+
+  Route53ZoneId:
+    Type: String
+    Description: Route53 hosted zone ID for the domain
+
+  ApiCertificateArn:
+    Type: String
+    Description: ACM certificate ARN for API (regional, eu-west-3)
+
+  CloudFrontCertificateArn:
+    Type: String
+    Description: ACM certificate ARN for CloudFront (must be in us-east-1)
+
+  LogRetentionDays:
+    Type: Number
+    Default: 7
+    AllowedValues: [1, 3, 5, 7, 14, 30, 60, 90, 120, 150, 180, 365]
+    Description: CloudWatch log retention in days
+
+# -----------------------------------------------------------------------------
+# Globals
+# -----------------------------------------------------------------------------
+Globals:
+  Function:
+    Timeout: 30
+    MemorySize: 512
+    Runtime: python3.11
+    Tracing: Active
+    Tags:
+      Project: VirtualMe
+      Environment: !Ref Environment
+      ManagedBy: SAM
+
+# -----------------------------------------------------------------------------
+# Resources
+# -----------------------------------------------------------------------------
+Resources:
+
+  # ---------------------------------------------------------------------------
+  # Lambda Function
+  # ---------------------------------------------------------------------------
+  VirtualMeFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub virtual-me-v2-${Environment}
+      CodeUri: ../src/
+      Handler: lambda_function.lambda_handler
+      Description: Virtual Me v2 chatbot Lambda function
+      Environment:
+        Variables:
+          LLM_BACKEND: bedrock
+          LLM_MODEL: !Ref LlmModel
+          LLM_TEMPERATURE: !Ref LlmTemperature
+          EMBEDDING_BACKEND: bedrock
+          EMBEDDING_MODEL: !Ref EmbeddingModel
+          DYNAMODB_TABLE: !Ref VectorTable
+      Policies:
+        - Version: '2012-10-17'
+          Statement:
+            - Effect: Allow
+              Action:
+                - logs:CreateLogGroup
+                - logs:CreateLogStream
+                - logs:PutLogEvents
+              Resource:
+                - !Sub arn:aws:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/lambda/virtual-me-v2-${Environment}
+                - !Sub arn:aws:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/lambda/virtual-me-v2-${Environment}:*
+            - Effect: Allow
+              Action:
+                - bedrock:InvokeModel
+                - bedrock:InvokeModelWithResponseStream
+              Resource:
+                - arn:aws:bedrock:*::foundation-model/*
+                - !Sub arn:aws:bedrock:${AWS::Region}:${AWS::AccountId}:inference-profile/*
+            - Effect: Allow
+              Action:
+                - dynamodb:PutItem
+                - dynamodb:GetItem
+                - dynamodb:Scan
+                - dynamodb:Query
+                - dynamodb:BatchWriteItem
+              Resource:
+                - !GetAtt VectorTable.Arn
+            - Effect: Allow
+              Action:
+                - xray:PutTraceSegments
+                - xray:PutTelemetryRecords
+              Resource: '*'
+      Events:
+        ChatApi:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref VirtualMeApi
+            Path: /chat
+            Method: POST
+    Metadata:
+      BuildMethod: python3.11
+
+  # Lambda Log Group
+  VirtualMeFunctionLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub /aws/lambda/virtual-me-v2-${Environment}
+      RetentionInDays: !Ref LogRetentionDays
+
+  # ---------------------------------------------------------------------------
+  # HTTP API Gateway
+  # ---------------------------------------------------------------------------
+  VirtualMeApi:
+    Type: AWS::Serverless::HttpApi
+    Properties:
+      StageName: prod
+      Description: Virtual Me v2 HTTP API
+      CorsConfiguration:
+        AllowOrigins:
+          - !Sub https://${FrontendSubdomain}.${DomainName}
+        AllowMethods:
+          - POST
+          - OPTIONS
+        AllowHeaders:
+          - content-type
+        MaxAge: 300
+      AccessLogSettings:
+        DestinationArn: !GetAtt ApiLogGroup.Arn
+        Format: '{"requestId":"$context.requestId","ip":"$context.identity.sourceIp","requestTime":"$context.requestTime","httpMethod":"$context.httpMethod","routeKey":"$context.routeKey","status":"$context.status","protocol":"$context.protocol","responseLength":"$context.responseLength"}'
+      DefaultRouteSettings:
+        ThrottlingBurstLimit: 100
+        ThrottlingRateLimit: 50
+      Tags:
+        Project: VirtualMe
+        Environment: !Ref Environment
+
+  # API Log Group
+  ApiLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub /aws/apigateway/virtual-me-v2-api-${Environment}
+      RetentionInDays: !Ref LogRetentionDays
+
+  # ---------------------------------------------------------------------------
+  # API Custom Domain
+  # ---------------------------------------------------------------------------
+  ApiDomainName:
+    Type: AWS::ApiGatewayV2::DomainName
+    Properties:
+      DomainName: !Sub ${ApiSubdomain}.${DomainName}
+      DomainNameConfigurations:
+        - CertificateArn: !Ref ApiCertificateArn
+          EndpointType: REGIONAL
+          SecurityPolicy: TLS_1_2
+      Tags:
+        Project: VirtualMe
+        Environment: !Ref Environment
+
+  ApiMapping:
+    Type: AWS::ApiGatewayV2::ApiMapping
+    Properties:
+      ApiId: !Ref VirtualMeApi
+      DomainName: !Ref ApiDomainName
+      Stage: !Ref VirtualMeApi.Stage
+
+  ApiDnsRecord:
+    Type: AWS::Route53::RecordSet
+    Properties:
+      HostedZoneId: !Ref Route53ZoneId
+      Name: !Sub ${ApiSubdomain}.${DomainName}
+      Type: A
+      AliasTarget:
+        DNSName: !GetAtt ApiDomainName.RegionalDomainName
+        HostedZoneId: !GetAtt ApiDomainName.RegionalHostedZoneId
+
+  # ---------------------------------------------------------------------------
+  # DynamoDB Table
+  # ---------------------------------------------------------------------------
+  VectorTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: virtual-me-v2-vectors
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - AttributeName: id
+          AttributeType: S
+      KeySchema:
+        - AttributeName: id
+          KeyType: HASH
+      PointInTimeRecoverySpecification:
+        PointInTimeRecoveryEnabled: true
+      Tags:
+        - Key: Project
+          Value: VirtualMe
+        - Key: Environment
+          Value: !Ref Environment
+        - Key: Purpose
+          Value: Stores document embeddings for RAG
+
+  # ---------------------------------------------------------------------------
+  # S3 Frontend Bucket
+  # ---------------------------------------------------------------------------
+  FrontendBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName: !Sub virtual-me-v2-frontend-${Environment}-${AWS::AccountId}
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+      Tags:
+        - Key: Project
+          Value: VirtualMe
+        - Key: Environment
+          Value: !Ref Environment
+
+  FrontendBucketPolicy:
+    Type: AWS::S3::BucketPolicy
+    Properties:
+      Bucket: !Ref FrontendBucket
+      PolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Sid: AllowCloudFrontServicePrincipal
+            Effect: Allow
+            Principal:
+              Service: cloudfront.amazonaws.com
+            Action: s3:GetObject
+            Resource: !Sub ${FrontendBucket.Arn}/*
+            Condition:
+              StringEquals:
+                AWS:SourceArn: !Sub arn:aws:cloudfront::${AWS::AccountId}:distribution/${CloudFrontDistribution}
+
+  # ---------------------------------------------------------------------------
+  # CloudFront Distribution
+  # ---------------------------------------------------------------------------
+  CloudFrontOAC:
+    Type: AWS::CloudFront::OriginAccessControl
+    Properties:
+      OriginAccessControlConfig:
+        Name: !Sub virtual-me-v2-frontend-${Environment}-oac
+        Description: OAC for Virtual Me v2 frontend bucket
+        OriginAccessControlOriginType: s3
+        SigningBehavior: always
+        SigningProtocol: sigv4
+
+  CloudFrontDistribution:
+    Type: AWS::CloudFront::Distribution
+    Properties:
+      DistributionConfig:
+        Enabled: true
+        IPV6Enabled: true
+        DefaultRootObject: index.html
+        Aliases:
+          - !Sub ${FrontendSubdomain}.${DomainName}
+        PriceClass: PriceClass_100
+        Origins:
+          - Id: S3Origin
+            DomainName: !GetAtt FrontendBucket.RegionalDomainName
+            OriginAccessControlId: !Ref CloudFrontOAC
+            S3OriginConfig:
+              OriginAccessIdentity: ''
+        DefaultCacheBehavior:
+          TargetOriginId: S3Origin
+          ViewerProtocolPolicy: redirect-to-https
+          AllowedMethods:
+            - GET
+            - HEAD
+            - OPTIONS
+          CachedMethods:
+            - GET
+            - HEAD
+          Compress: true
+          ForwardedValues:
+            QueryString: false
+            Cookies:
+              Forward: none
+          MinTTL: 0
+          DefaultTTL: 3600
+          MaxTTL: 86400
+        CustomErrorResponses:
+          - ErrorCode: 404
+            ResponseCode: 200
+            ResponsePagePath: /index.html
+        ViewerCertificate:
+          AcmCertificateArn: !Ref CloudFrontCertificateArn
+          SslSupportMethod: sni-only
+          MinimumProtocolVersion: TLSv1.2_2021
+        Restrictions:
+          GeoRestriction:
+            RestrictionType: none
+      Tags:
+        - Key: Project
+          Value: VirtualMe
+        - Key: Environment
+          Value: !Ref Environment
+
+  FrontendDnsRecord:
+    Type: AWS::Route53::RecordSet
+    Properties:
+      HostedZoneId: !Ref Route53ZoneId
+      Name: !Sub ${FrontendSubdomain}.${DomainName}
+      Type: A
+      AliasTarget:
+        DNSName: !GetAtt CloudFrontDistribution.DomainName
+        HostedZoneId: Z2FDTNDATAQYW2  # CloudFront hosted zone ID (constant)
+
+  # ---------------------------------------------------------------------------
+  # SNS Topic for Alarms
+  # ---------------------------------------------------------------------------
+  AlarmTopic:
+    Type: AWS::SNS::Topic
+    Properties:
+      TopicName: !Sub virtual-me-v2-${Environment}-alarms
+      Tags:
+        - Key: Project
+          Value: VirtualMe
+        - Key: Environment
+          Value: !Ref Environment
+
+  # ---------------------------------------------------------------------------
+  # CloudWatch Alarms - Lambda
+  # ---------------------------------------------------------------------------
+  LambdaErrorsAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: !Sub virtual-me-v2-${Environment}-lambda-errors
+      AlarmDescription: Alert when Lambda function has errors
+      MetricName: Errors
+      Namespace: AWS/Lambda
+      Statistic: Sum
+      Period: 60
+      EvaluationPeriods: 2
+      Threshold: 5
+      ComparisonOperator: GreaterThanThreshold
+      TreatMissingData: notBreaching
+      Dimensions:
+        - Name: FunctionName
+          Value: !Ref VirtualMeFunction
+      AlarmActions:
+        - !Ref AlarmTopic
+
+  LambdaThrottlesAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: !Sub virtual-me-v2-${Environment}-lambda-throttles
+      AlarmDescription: Alert when Lambda function is throttled
+      MetricName: Throttles
+      Namespace: AWS/Lambda
+      Statistic: Sum
+      Period: 60
+      EvaluationPeriods: 1
+      Threshold: 0
+      ComparisonOperator: GreaterThanThreshold
+      TreatMissingData: notBreaching
+      Dimensions:
+        - Name: FunctionName
+          Value: !Ref VirtualMeFunction
+      AlarmActions:
+        - !Ref AlarmTopic
+
+  LambdaDurationAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: !Sub virtual-me-v2-${Environment}-lambda-duration
+      AlarmDescription: Alert when Lambda duration is consistently high
+      MetricName: Duration
+      Namespace: AWS/Lambda
+      Statistic: Average
+      Period: 60
+      EvaluationPeriods: 3
+      Threshold: 25000
+      ComparisonOperator: GreaterThanThreshold
+      TreatMissingData: notBreaching
+      Dimensions:
+        - Name: FunctionName
+          Value: !Ref VirtualMeFunction
+      AlarmActions:
+        - !Ref AlarmTopic
+
+  LambdaConcurrentExecutionsAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: !Sub virtual-me-v2-${Environment}-lambda-concurrent-executions
+      AlarmDescription: Alert when concurrent executions are high
+      MetricName: ConcurrentExecutions
+      Namespace: AWS/Lambda
+      Statistic: Maximum
+      Period: 60
+      EvaluationPeriods: 2
+      Threshold: 50
+      ComparisonOperator: GreaterThanThreshold
+      TreatMissingData: notBreaching
+      Dimensions:
+        - Name: FunctionName
+          Value: !Ref VirtualMeFunction
+      AlarmActions:
+        - !Ref AlarmTopic
+
+  # ---------------------------------------------------------------------------
+  # CloudWatch Alarms - API Gateway
+  # ---------------------------------------------------------------------------
+  Api5xxErrorsAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: !Sub virtual-me-v2-api-${Environment}-5xx-errors
+      AlarmDescription: Alert when API Gateway has server errors
+      MetricName: 5XXError
+      Namespace: AWS/ApiGateway
+      Statistic: Sum
+      Period: 60
+      EvaluationPeriods: 2
+      Threshold: 5
+      ComparisonOperator: GreaterThanThreshold
+      TreatMissingData: notBreaching
+      Dimensions:
+        - Name: ApiId
+          Value: !Ref VirtualMeApi
+      AlarmActions:
+        - !Ref AlarmTopic
+
+  Api4xxErrorsAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: !Sub virtual-me-v2-api-${Environment}-4xx-errors
+      AlarmDescription: Alert when API Gateway has many client errors
+      MetricName: 4XXError
+      Namespace: AWS/ApiGateway
+      Statistic: Sum
+      Period: 300
+      EvaluationPeriods: 2
+      Threshold: 50
+      ComparisonOperator: GreaterThanThreshold
+      TreatMissingData: notBreaching
+      Dimensions:
+        - Name: ApiId
+          Value: !Ref VirtualMeApi
+      AlarmActions:
+        - !Ref AlarmTopic
+
+# -----------------------------------------------------------------------------
+# Outputs
+# -----------------------------------------------------------------------------
+Outputs:
+  # Lambda
+  FunctionName:
+    Description: Lambda function name
+    Value: !Ref VirtualMeFunction
+
+  FunctionArn:
+    Description: Lambda function ARN
+    Value: !GetAtt VirtualMeFunction.Arn
+
+  # API
+  ApiEndpoint:
+    Description: HTTP API endpoint URL
+    Value: !Sub https://${ApiSubdomain}.${DomainName}/chat
+
+  ApiId:
+    Description: HTTP API ID
+    Value: !Ref VirtualMeApi
+
+  # Frontend
+  FrontendUrl:
+    Description: Frontend URL
+    Value: !Sub https://${FrontendSubdomain}.${DomainName}
+
+  FrontendBucketName:
+    Description: S3 bucket name for frontend files
+    Value: !Ref FrontendBucket
+
+  CloudFrontDistributionId:
+    Description: CloudFront distribution ID
+    Value: !Ref CloudFrontDistribution
+
+  CloudFrontDomainName:
+    Description: CloudFront domain name
+    Value: !GetAtt CloudFrontDistribution.DomainName
+
+  # DynamoDB
+  DynamoDBTableName:
+    Description: DynamoDB table name for vectors
+    Value: !Ref VectorTable
+
+  DynamoDBTableArn:
+    Description: DynamoDB table ARN
+    Value: !GetAtt VectorTable.Arn
+
+  # Monitoring
+  SNSTopicArn:
+    Description: SNS topic ARN for alarm notifications
+    Value: !Ref AlarmTopic

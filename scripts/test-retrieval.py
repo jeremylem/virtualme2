@@ -14,7 +14,7 @@ import os
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '../src'))
 
 os.environ['AWS_DEFAULT_REGION'] = 'eu-west-3'
-os.environ['DYNAMODB_TABLE'] = 'virtual-me-chatbot-prod-vectors'
+os.environ['DYNAMODB_TABLE'] = os.environ.get('DYNAMODB_TABLE', 'virtual-me-v2-vectors')
 os.environ['LLM_BACKEND'] = 'bedrock'
 
 from rag.dynamodb_retriever import get_retriever

@@ -6,7 +6,7 @@
 
 set -e
 
-TABLE_NAME="${DYNAMODB_TABLE:-virtual-me-chatbot-prod-vectors}"
+TABLE_NAME="${DYNAMODB_TABLE:-virtual-me-v2-vectors}"
 REGION="${AWS_REGION:-eu-west-3}"
 
 echo "Clearing vectors from DynamoDB table: $TABLE_NAME (region: $REGION)"

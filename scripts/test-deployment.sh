@@ -5,7 +5,7 @@
 
 set -e
 
-API_ENDPOINT="${1:-https://api.lemaire.tel/chat}"
+API_ENDPOINT="${1:-https://api2.lemaire.tel/chat}"
 
 echo "=========================================="
 echo "Testing Virtual Me Deployment"
@@ -58,7 +58,7 @@ echo "Testing Complete!"
 echo "=========================================="
 echo ""
 echo "View logs:"
-echo "  aws logs tail /aws/lambda/virtual-me-chatbot-prod --follow"
+echo "  aws logs tail /aws/lambda/virtual-me-v2-prod --follow"
 echo ""
 echo "View X-Ray traces:"
 echo "  AWS Console → X-Ray → Traces"

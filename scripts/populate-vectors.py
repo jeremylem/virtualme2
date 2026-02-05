@@ -16,7 +16,7 @@ import os
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '../src'))
 
 os.environ['AWS_DEFAULT_REGION'] = 'eu-west-3'
-os.environ['DYNAMODB_TABLE'] = 'virtual-me-chatbot-prod-vectors'
+os.environ['DYNAMODB_TABLE'] = os.environ.get('DYNAMODB_TABLE', 'virtual-me-v2-vectors')
 
 from loaders.knowledge_base import load_knowledge_base
 from vectorstores.dynamodb_vector_store import DynamoDBVectorStore
@@ -41,8 +41,9 @@ def main():
 
     # Initialize vector store
     print("\n3. Connecting to DynamoDB...")
+    table_name = os.environ.get('DYNAMODB_TABLE', 'virtual-me-v2-vectors')
     vector_store = DynamoDBVectorStore(
-        table_name='virtual-me-chatbot-prod-vectors',
+        table_name=table_name,
         region='eu-west-3'
     )
 
