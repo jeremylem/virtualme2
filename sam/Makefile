@@ -1,4 +1,4 @@
-.PHONY: build deploy deploy-frontend deploy-all validate logs logs-api clean delete help upload-kb start-ingestion ingest ingestion-status run-local test-local
+.PHONY: build deploy deploy-frontend deploy-all validate logs logs-api clean delete help upload-kb start-ingestion ingest ingestion-status run-local test-local cold-start-metrics
 
 # Default target
 help:
@@ -13,6 +13,7 @@ help:
 	@echo "  make validate        - Validate SAM template"
 	@echo "  make logs            - Tail Lambda function logs"
 	@echo "  make logs-api        - Tail API Gateway logs"
+	@echo "  make cold-start-metrics - Show cold start statistics"
 	@echo "  make clean           - Remove build artifacts"
 	@echo "  make delete          - Delete the entire SAM stack"
 	@echo ""
@@ -109,3 +110,15 @@ ingestion-status:
 	DS_COMPOSITE=$$(aws cloudformation describe-stacks --stack-name virtual-me-v2 --query 'Stacks[0].Outputs[?OutputKey==`DataSourceId`].OutputValue' --output text) && \
 	DS_ID=$${DS_COMPOSITE##*|} && \
 	aws bedrock-agent list-ingestion-jobs --knowledge-base-id $$KB_ID --data-source-id $$DS_ID --query 'ingestionJobSummaries[0]' --output table
+
+# Show cold start metrics from CloudWatch Logs
+cold-start-metrics:
+	@echo "Fetching cold start metrics from last 7 days..."
+	@QUERY_ID=$$(aws logs start-query \
+		--log-group-name /aws/lambda/virtual-me-v2 \
+		--start-time $$(date -u -v-7d +%s) \
+		--end-time $$(date -u +%s) \
+		--query-string 'fields @initDuration, @duration, @memorySize | filter @type = "REPORT" and ispresent(@initDuration) | stats avg(@initDuration) as avgColdStart, max(@initDuration) as maxColdStart, min(@initDuration) as minColdStart, pct(@initDuration, 50) as p50ColdStart, pct(@initDuration, 99) as p99ColdStart, count() as totalColdStarts' \
+		--query 'queryId' --output text) && \
+	sleep 3 && \
+	aws logs get-query-results --query-id $$QUERY_ID --output table

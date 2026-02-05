@@ -102,7 +102,7 @@ func isMetaQuestion(_ question: String) -> Bool {
 
 func getMetaResponse() -> String {
     """
-    I'm Virtual Me, a RAG-powered chatbot representing Jeremy Lemaire. \
+    I'm Virtual Me, a RAG-powered chatbot representing J. Lemaire. \
     I'm built with Swift on AWS Lambda, S3 Vectors, Bedrock Knowledge Base, \
     and Amazon Bedrock (Nova 2 Lite model). When you ask a question, \
     Bedrock retrieves relevant sections from Jeremy's resume using semantic search, \

@@ -224,11 +224,15 @@ src/knowledge_base/
 # AWS SAM
 .aws-sam/
 sam/.aws-sam/
+sam/samconfig.toml
 
 # Swift build artifacts
 swift/.build/
 *.swiftpm
 .DS_Store
+
+# Knowledge base (personal data)
+knowledge_base/
 
 # LocalStack
 volume/
