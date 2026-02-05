@@ -1,11 +1,13 @@
-.PHONY: build deploy deploy-frontend deploy-all validate logs logs-api clean delete help upload-kb start-ingestion ingest ingestion-status
+.PHONY: build deploy deploy-frontend deploy-all validate logs logs-api clean delete help upload-kb start-ingestion ingest ingestion-status run-local test-local
 
 # Default target
 help:
 	@echo "Virtual Me v2 - SAM Deployment Commands"
 	@echo ""
-	@echo "  make build           - Build Lambda function with container"
-	@echo "  make deploy          - Deploy SAM stack (first time: use 'sam deploy --guided')"
+	@echo "  make build           - Build Swift Lambda function"
+	@echo "  make run-local       - Run Lambda locally (swift run)"
+	@echo "  make test-local      - Test local Lambda with sample request"
+	@echo "  make deploy          - Deploy SAM stack"
 	@echo "  make deploy-frontend - Sync frontend files to S3 and invalidate CloudFront"
 	@echo "  make deploy-all      - Build, deploy stack, and deploy frontend"
 	@echo "  make validate        - Validate SAM template"
@@ -21,11 +23,19 @@ help:
 	@echo "  make ingestion-status - Check ingestion job status"
 	@echo ""
 
-# Build Lambda function using container for consistent Linux binaries
+# Build Swift Lambda using AWS Lambda Swift plugin
 build:
-	sam build --use-container
+	cd ../swift && swift package --disable-sandbox plugin archive --allow-network-connections all
 
-# Deploy SAM stack (assumes samconfig.toml is configured)
+# Run Lambda locally for development
+run-local:
+	cd ../swift && KNOWLEDGE_BASE_ID=PMWGLLCEHL LLM_MODEL=nova-2-lite LLM_TEMPERATURE=0.1 swift run
+
+# Test local Lambda with sample request (run-local must be running)
+test-local:
+	./scripts/test-local.sh
+
+# Deploy SAM stack
 deploy:
 	sam deploy
 
@@ -50,11 +60,11 @@ logs:
 
 # Tail API Gateway logs
 logs-api:
-	aws logs tail /aws/apigateway/virtual-me-v2-api-prod --follow
+	aws logs tail /aws/apigateway/virtual-me-v2-api --follow
 
 # Remove build artifacts
 clean:
-	rm -rf .aws-sam
+	rm -rf .aws-sam ../swift/.build
 
 # Delete the entire SAM stack (careful!)
 delete:

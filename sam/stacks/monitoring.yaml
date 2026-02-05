@@ -1,0 +1,65 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: Virtual Me v2 - Monitoring Stack (Alarms + SNS)
+
+Parameters:
+  VirtualMeFunctionName:
+    Type: String
+    Description: Lambda function name to monitor
+  
+  VirtualMeApiId:
+    Type: String
+    Description: API Gateway ID to monitor
+
+Resources:
+  AlarmTopic:
+    Type: AWS::SNS::Topic
+    Properties:
+      TopicName: virtual-me-v2-alarms
+      Tags:
+        - Key: Project
+          Value: VirtualMe
+
+  LambdaErrorsAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: virtual-me-v2-lambda-errors
+      AlarmDescription: Alert when Lambda function has errors
+      MetricName: Errors
+      Namespace: AWS/Lambda
+      Statistic: Sum
+      Period: 60
+      EvaluationPeriods: 2
+      Threshold: 5
+      ComparisonOperator: GreaterThanThreshold
+      TreatMissingData: notBreaching
+      Dimensions:
+        - Name: FunctionName
+          Value: !Ref VirtualMeFunctionName
+      AlarmActions:
+        - !Ref AlarmTopic
+
+  Api5xxErrorsAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: virtual-me-v2-api-5xx-errors
+      AlarmDescription: Alert when API Gateway has server errors
+      MetricName: 5XXError
+      Namespace: AWS/ApiGateway
+      Statistic: Sum
+      Period: 60
+      EvaluationPeriods: 2
+      Threshold: 5
+      ComparisonOperator: GreaterThanThreshold
+      TreatMissingData: notBreaching
+      Dimensions:
+        - Name: ApiId
+          Value: !Ref VirtualMeApiId
+      AlarmActions:
+        - !Ref AlarmTopic
+
+Outputs:
+  SNSTopicArn:
+    Description: SNS topic ARN for alarm notifications
+    Value: !Ref AlarmTopic
+    Export:
+      Name: !Sub ${AWS::StackName}-SNSTopicArn

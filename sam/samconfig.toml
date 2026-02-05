@@ -21,13 +21,13 @@ capabilities = "CAPABILITY_IAM CAPABILITY_NAMED_IAM CAPABILITY_AUTO_EXPAND"
 parameter_overrides = [
     "Environment=prod",
     "DomainName=lemaire.tel",
-    "FrontendSubdomain=chat2",
-    "ApiSubdomain=api2",
+    "FrontendSubdomain=chat",
+    "ApiSubdomain=api",
     "LlmModel=nova-2-lite",
     "LlmTemperature=0.1",
     "Route53ZoneId=Z042219115MNG2VU6NRK9",
-    "ApiCertificateArn=arn:aws:acm:eu-west-3:298290307734:certificate/47d1a074-f5a8-429f-a813-87db44d71217",
-    "CloudFrontCertificateArn=arn:aws:acm:us-east-1:298290307734:certificate/855ac7bf-da8a-45d1-b0fe-609e319b8fbe",
+    "ApiCertificateArn=arn:aws:acm:eu-west-3:298290307734:certificate/a98b706d-bf23-480a-a888-8417ccfcc162",
+    "CloudFrontCertificateArn=arn:aws:acm:us-east-1:298290307734:certificate/df68292c-240f-4e8b-a75b-c4cad28b6eb9",
 ]
 s3_prefix = "virtual-me-v2"
 resolve_s3 = true

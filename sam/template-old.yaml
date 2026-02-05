@@ -1,0 +1,503 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Transform: AWS::Serverless-2016-10-31
+Description: Virtual Me v2 Chatbot - SAM Deployment
+
+# -----------------------------------------------------------------------------
+# Parameters
+# -----------------------------------------------------------------------------
+Parameters:
+  DomainName:
+    Type: String
+    Default: lemaire.tel
+    Description: Root domain name
+
+  FrontendSubdomain:
+    Type: String
+    Default: chat2
+    Description: Subdomain for frontend
+
+  ApiSubdomain:
+    Type: String
+    Default: api2
+    Description: Subdomain for API
+
+  LlmModel:
+    Type: String
+    Default: nova-2-lite
+    Description: LLM model identifier for Bedrock
+
+  LlmTemperature:
+    Type: String
+    Default: '0.1'
+    Description: LLM temperature (0.0-1.0)
+
+  Route53ZoneId:
+    Type: String
+    Description: Route53 hosted zone ID for the domain
+
+  ApiCertificateArn:
+    Type: String
+    Description: ACM certificate ARN for API (regional, eu-west-3)
+
+  CloudFrontCertificateArn:
+    Type: String
+    Description: ACM certificate ARN for CloudFront (must be in us-east-1)
+
+  LogRetentionDays:
+    Type: Number
+    Default: 7
+    AllowedValues: [1, 3, 5, 7, 14, 30, 60, 90, 120, 150, 180, 365]
+    Description: CloudWatch log retention in days
+
+# -----------------------------------------------------------------------------
+# Globals
+# -----------------------------------------------------------------------------
+Globals:
+  Function:
+    Timeout: 15
+    MemorySize: 256
+    Runtime: provided.al2023
+    Architectures:
+      - arm64
+    Tracing: Active
+    Tags:
+      Project: VirtualMe
+      ManagedBy: SAM
+
+# -----------------------------------------------------------------------------
+# Resources
+# -----------------------------------------------------------------------------
+Resources:
+
+  # ---------------------------------------------------------------------------
+  # Lambda Function
+  # ---------------------------------------------------------------------------
+  VirtualMeFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: virtual-me-v2
+      CodeUri: ../swift/.build/plugins/AWSLambdaPackager/outputs/AWSLambdaPackager/VirtualMeSwift/VirtualMeSwift.zip
+      Handler: bootstrap
+      Description: Virtual Me v2 chatbot Lambda function
+      Environment:
+        Variables:
+          LLM_BACKEND: bedrock
+          LLM_MODEL: !Ref LlmModel
+          LLM_TEMPERATURE: !Ref LlmTemperature
+          KNOWLEDGE_BASE_ID: !Ref KnowledgeBase
+      Policies:
+        - Version: '2012-10-17'
+          Statement:
+            - Effect: Allow
+              Action:
+                - logs:CreateLogGroup
+                - logs:CreateLogStream
+                - logs:PutLogEvents
+              Resource:
+                - !Sub arn:aws:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/lambda/virtual-me-v2
+                - !Sub arn:aws:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/lambda/virtual-me-v2:*
+            - Effect: Allow
+              Action:
+                - bedrock:InvokeModel
+                - bedrock:InvokeModelWithResponseStream
+              Resource:
+                - arn:aws:bedrock:*::foundation-model/*
+                - !Sub arn:aws:bedrock:${AWS::Region}:${AWS::AccountId}:inference-profile/*
+            - Effect: Allow
+              Action:
+                - bedrock:Retrieve
+              Resource:
+                - !GetAtt KnowledgeBase.KnowledgeBaseArn
+            - Effect: Allow
+              Action:
+                - xray:PutTraceSegments
+                - xray:PutTelemetryRecords
+              Resource: '*'
+      Events:
+        ChatApi:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref VirtualMeApi
+            Path: /chat
+            Method: POST
+    Metadata:
+      BuildMethod: python3.11
+
+  # Lambda Log Group
+  VirtualMeFunctionLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: /aws/lambda/virtual-me-v2
+      RetentionInDays: !Ref LogRetentionDays
+
+  # ---------------------------------------------------------------------------
+  # HTTP API Gateway
+  # ---------------------------------------------------------------------------
+  VirtualMeApi:
+    Type: AWS::Serverless::HttpApi
+    Properties:
+      StageName: prod
+      Description: Virtual Me v2 HTTP API
+      CorsConfiguration:
+        AllowOrigins:
+          - !Sub https://${FrontendSubdomain}.${DomainName}
+        AllowMethods:
+          - POST
+          - OPTIONS
+        AllowHeaders:
+          - content-type
+        MaxAge: 300
+      AccessLogSettings:
+        DestinationArn: !GetAtt ApiLogGroup.Arn
+        Format: '{"requestId":"$context.requestId","ip":"$context.identity.sourceIp","requestTime":"$context.requestTime","httpMethod":"$context.httpMethod","routeKey":"$context.routeKey","status":"$context.status","protocol":"$context.protocol","responseLength":"$context.responseLength"}'
+      DefaultRouteSettings:
+        ThrottlingBurstLimit: 20
+        ThrottlingRateLimit: 10
+      Tags:
+        Project: VirtualMe
+
+  # API Log Group
+  ApiLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: /aws/apigateway/virtual-me-v2-api
+      RetentionInDays: !Ref LogRetentionDays
+
+  # ---------------------------------------------------------------------------
+  # API Custom Domain
+  # ---------------------------------------------------------------------------
+  ApiDomainName:
+    Type: AWS::ApiGatewayV2::DomainName
+    Properties:
+      DomainName: !Sub ${ApiSubdomain}.${DomainName}
+      DomainNameConfigurations:
+        - CertificateArn: !Ref ApiCertificateArn
+          EndpointType: REGIONAL
+          SecurityPolicy: TLS_1_2
+      Tags:
+        Project: VirtualMe
+
+  ApiMapping:
+    Type: AWS::ApiGatewayV2::ApiMapping
+    Properties:
+      ApiId: !Ref VirtualMeApi
+      DomainName: !Ref ApiDomainName
+      Stage: !Ref VirtualMeApi.Stage
+
+  ApiDnsRecord:
+    Type: AWS::Route53::RecordSet
+    Properties:
+      HostedZoneId: !Ref Route53ZoneId
+      Name: !Sub ${ApiSubdomain}.${DomainName}
+      Type: A
+      AliasTarget:
+        DNSName: !GetAtt ApiDomainName.RegionalDomainName
+        HostedZoneId: !GetAtt ApiDomainName.RegionalHostedZoneId
+
+  # ---------------------------------------------------------------------------
+  # S3 Knowledge Base Bucket
+  # ---------------------------------------------------------------------------
+  KnowledgeBaseBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName: !Sub virtual-me-v2-kb-prod-${AWS::AccountId}
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+      Tags:
+        - Key: Project
+          Value: VirtualMe
+
+  # ---------------------------------------------------------------------------
+  # S3 Vectors Bucket and Index
+  # ---------------------------------------------------------------------------
+  VectorBucket:
+    Type: AWS::S3Vectors::VectorBucket
+    Properties:
+      VectorBucketName: !Sub virtual-me-v2-vectors-prod
+
+  VectorIndex:
+    Type: AWS::S3Vectors::Index
+    Properties:
+      VectorBucketArn: !GetAtt VectorBucket.VectorBucketArn
+      IndexName: virtual-me-v2-index
+      DataType: float32
+      Dimension: 1024
+      DistanceMetric: cosine
+      MetadataConfiguration:
+        NonFilterableMetadataKeys:
+          - AMAZON_BEDROCK_TEXT
+          - AMAZON_BEDROCK_METADATA
+
+  # ---------------------------------------------------------------------------
+  # Bedrock Knowledge Base IAM Role
+  # ---------------------------------------------------------------------------
+  BedrockKnowledgeBaseRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub virtual-me-v2-bedrock-kb-role
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: bedrock.amazonaws.com
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: S3Access
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - s3:GetObject
+                  - s3:ListBucket
+                Resource:
+                  - !GetAtt KnowledgeBaseBucket.Arn
+                  - !Sub ${KnowledgeBaseBucket.Arn}/*
+        - PolicyName: S3VectorsAccess
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - s3vectors:GetVectorBucket
+                  - s3vectors:ListIndexes
+                Resource: !GetAtt VectorBucket.VectorBucketArn
+              - Effect: Allow
+                Action:
+                  - s3vectors:GetIndex
+                  - s3vectors:GetVectors
+                  - s3vectors:ListVectors
+                  - s3vectors:PutVectors
+                  - s3vectors:QueryVectors
+                  - s3vectors:DeleteVectors
+                Resource: !GetAtt VectorIndex.IndexArn
+        - PolicyName: BedrockEmbeddings
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action: bedrock:InvokeModel
+                Resource: !Sub arn:aws:bedrock:${AWS::Region}::foundation-model/amazon.titan-embed-text-v2:0
+      Tags:
+        - Key: Project
+          Value: VirtualMe
+
+  # ---------------------------------------------------------------------------
+  # Bedrock Knowledge Base
+  # ---------------------------------------------------------------------------
+  KnowledgeBase:
+    Type: AWS::Bedrock::KnowledgeBase
+    Properties:
+      Name: !Sub virtual-me-v2-kb-prod
+      RoleArn: !GetAtt BedrockKnowledgeBaseRole.Arn
+      KnowledgeBaseConfiguration:
+        Type: VECTOR
+        VectorKnowledgeBaseConfiguration:
+          EmbeddingModelArn: !Sub arn:aws:bedrock:${AWS::Region}::foundation-model/amazon.titan-embed-text-v2:0
+      StorageConfiguration:
+        Type: S3_VECTORS
+        S3VectorsConfiguration:
+          IndexArn: !GetAtt VectorIndex.IndexArn
+      Tags:
+        Project: VirtualMe
+
+  # ---------------------------------------------------------------------------
+  # Bedrock Data Source
+  # ---------------------------------------------------------------------------
+  DataSource:
+    Type: AWS::Bedrock::DataSource
+    Properties:
+      KnowledgeBaseId: !Ref KnowledgeBase
+      Name: !Sub virtual-me-v2-resume-source
+      DataSourceConfiguration:
+        Type: S3
+        S3Configuration:
+          BucketArn: !GetAtt KnowledgeBaseBucket.Arn
+          InclusionPrefixes:
+            - knowledge_base/
+      VectorIngestionConfiguration:
+        ChunkingConfiguration:
+          ChunkingStrategy: FIXED_SIZE
+          FixedSizeChunkingConfiguration:
+            MaxTokens: 300
+            OverlapPercentage: 10
+
+  # ---------------------------------------------------------------------------
+  # S3 Frontend Bucket
+  # ---------------------------------------------------------------------------
+  FrontendBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName: !Sub virtual-me-v2-frontend-prod-${AWS::AccountId}
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+      Tags:
+        - Key: Project
+          Value: VirtualMe
+
+  FrontendBucketPolicy:
+    Type: AWS::S3::BucketPolicy
+    Properties:
+      Bucket: !Ref FrontendBucket
+      PolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Sid: AllowCloudFrontServicePrincipal
+            Effect: Allow
+            Principal:
+              Service: cloudfront.amazonaws.com
+            Action: s3:GetObject
+            Resource: !Sub ${FrontendBucket.Arn}/*
+            Condition:
+              StringEquals:
+                AWS:SourceArn: !Sub arn:aws:cloudfront::${AWS::AccountId}:distribution/${CloudFrontDistribution}
+
+  # ---------------------------------------------------------------------------
+  # CloudFront Distribution
+  # ---------------------------------------------------------------------------
+  CloudFrontOAC:
+    Type: AWS::CloudFront::OriginAccessControl
+    Properties:
+      OriginAccessControlConfig:
+        Name: !Sub virtual-me-v2-frontend-prod-oac
+        Description: OAC for Virtual Me v2 frontend bucket
+        OriginAccessControlOriginType: s3
+        SigningBehavior: always
+        SigningProtocol: sigv4
+
+  CloudFrontDistribution:
+    Type: AWS::CloudFront::Distribution
+    Properties:
+      DistributionConfig:
+        Enabled: true
+        IPV6Enabled: true
+        DefaultRootObject: index.html
+        Aliases:
+          - !Sub ${FrontendSubdomain}.${DomainName}
+        PriceClass: PriceClass_200
+        Origins:
+          - Id: S3Origin
+            DomainName: !GetAtt FrontendBucket.RegionalDomainName
+            OriginAccessControlId: !Ref CloudFrontOAC
+            S3OriginConfig:
+              OriginAccessIdentity: ''
+        DefaultCacheBehavior:
+          TargetOriginId: S3Origin
+          ViewerProtocolPolicy: redirect-to-https
+          AllowedMethods:
+            - GET
+            - HEAD
+            - OPTIONS
+          CachedMethods:
+            - GET
+            - HEAD
+          Compress: true
+          ForwardedValues:
+            QueryString: false
+            Cookies:
+              Forward: none
+          MinTTL: 0
+          DefaultTTL: 3600
+          MaxTTL: 86400
+        CustomErrorResponses:
+          - ErrorCode: 404
+            ResponseCode: 200
+            ResponsePagePath: /index.html
+        ViewerCertificate:
+          AcmCertificateArn: !Ref CloudFrontCertificateArn
+          SslSupportMethod: sni-only
+          MinimumProtocolVersion: TLSv1.2_2021
+        Restrictions:
+          GeoRestriction:
+            RestrictionType: none
+      Tags:
+        - Key: Project
+          Value: VirtualMe
+
+  FrontendDnsRecord:
+    Type: AWS::Route53::RecordSet
+    Properties:
+      HostedZoneId: !Ref Route53ZoneId
+      Name: !Sub ${FrontendSubdomain}.${DomainName}
+      Type: A
+      AliasTarget:
+        DNSName: !GetAtt CloudFrontDistribution.DomainName
+        HostedZoneId: Z2FDTNDATAQYW2  # CloudFront hosted zone ID (constant)
+
+  # ---------------------------------------------------------------------------
+  # Monitoring Stack (Nested)
+  # ---------------------------------------------------------------------------
+  MonitoringStack:
+    Type: AWS::CloudFormation::Stack
+    Properties:
+      TemplateURL: ./stacks/monitoring.yaml
+      Parameters:
+        VirtualMeFunctionName: !Ref VirtualMeFunction
+        VirtualMeApiId: !Ref VirtualMeApi
+      Tags:
+        - Key: Project
+          Value: VirtualMe
+
+# -----------------------------------------------------------------------------
+# Outputs
+# -----------------------------------------------------------------------------
+Outputs:
+  # Lambda
+  FunctionName:
+    Description: Lambda function name
+    Value: !Ref VirtualMeFunction
+
+  FunctionArn:
+    Description: Lambda function ARN
+    Value: !GetAtt VirtualMeFunction.Arn
+
+  # API
+  ApiEndpoint:
+    Description: HTTP API endpoint URL
+    Value: !Sub https://${ApiSubdomain}.${DomainName}/chat
+
+  ApiId:
+    Description: HTTP API ID
+    Value: !Ref VirtualMeApi
+
+  # Frontend
+  FrontendUrl:
+    Description: Frontend URL
+    Value: !Sub https://${FrontendSubdomain}.${DomainName}
+
+  FrontendBucketName:
+    Description: S3 bucket name for frontend files
+    Value: !Ref FrontendBucket
+
+  CloudFrontDistributionId:
+    Description: CloudFront distribution ID
+    Value: !Ref CloudFrontDistribution
+
+  CloudFrontDomainName:
+    Description: CloudFront domain name
+    Value: !GetAtt CloudFrontDistribution.DomainName
+
+  # Knowledge Base
+  KnowledgeBaseId:
+    Description: Bedrock Knowledge Base ID
+    Value: !Ref KnowledgeBase
+
+  KnowledgeBaseBucketName:
+    Description: S3 bucket for knowledge base documents
+    Value: !Ref KnowledgeBaseBucket
+
+  DataSourceId:
+    Description: Bedrock Data Source ID
+    Value: !Ref DataSource
+
+  # Monitoring
+  SNSTopicArn:
+    Description: SNS topic ARN for alarm notifications
+    Value: !GetAtt MonitoringStack.Outputs.SNSTopicArn

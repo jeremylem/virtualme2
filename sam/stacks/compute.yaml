@@ -1,0 +1,197 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Transform: AWS::Serverless-2016-10-31
+Description: Virtual Me v2 - Compute Stack (Lambda + API Gateway)
+
+Parameters:
+  LlmModel:
+    Type: String
+    Description: LLM model identifier
+  
+  LlmTemperature:
+    Type: String
+    Description: LLM temperature
+  
+  DomainName:
+    Type: String
+    Description: Root domain name
+  
+  FrontendSubdomain:
+    Type: String
+    Description: Frontend subdomain
+  
+  ApiSubdomain:
+    Type: String
+    Description: API subdomain
+  
+  Route53ZoneId:
+    Type: String
+    Description: Route53 hosted zone ID
+  
+  ApiCertificateArn:
+    Type: String
+    Description: ACM certificate ARN for API
+  
+  LogRetentionDays:
+    Type: Number
+    Description: CloudWatch log retention in days
+  
+  KnowledgeBaseId:
+    Type: String
+    Description: Bedrock Knowledge Base ID
+  
+  KnowledgeBaseArn:
+    Type: String
+    Description: Bedrock Knowledge Base ARN
+
+Globals:
+  Function:
+    Timeout: 15
+    MemorySize: 256
+    Runtime: provided.al2023
+    Architectures:
+      - arm64
+    Tracing: Active
+    Tags:
+      Project: VirtualMe
+      ManagedBy: SAM
+
+Resources:
+  VirtualMeFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: virtual-me-v2
+      CodeUri: ../../swift/.build/plugins/AWSLambdaPackager/outputs/AWSLambdaPackager/VirtualMeSwift/VirtualMeSwift.zip
+      Handler: bootstrap
+      Description: Virtual Me v2 chatbot Lambda function
+      Environment:
+        Variables:
+          LLM_BACKEND: bedrock
+          LLM_MODEL: !Ref LlmModel
+          LLM_TEMPERATURE: !Ref LlmTemperature
+          KNOWLEDGE_BASE_ID: !Ref KnowledgeBaseId
+      Policies:
+        - Version: '2012-10-17'
+          Statement:
+            - Effect: Allow
+              Action:
+                - logs:CreateLogGroup
+                - logs:CreateLogStream
+                - logs:PutLogEvents
+              Resource:
+                - !Sub arn:aws:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/lambda/virtual-me-v2
+                - !Sub arn:aws:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/lambda/virtual-me-v2:*
+            - Effect: Allow
+              Action:
+                - bedrock:InvokeModel
+                - bedrock:InvokeModelWithResponseStream
+              Resource:
+                - arn:aws:bedrock:*::foundation-model/*
+                - !Sub arn:aws:bedrock:${AWS::Region}:${AWS::AccountId}:inference-profile/*
+            - Effect: Allow
+              Action:
+                - bedrock:Retrieve
+              Resource:
+                - !Ref KnowledgeBaseArn
+            - Effect: Allow
+              Action:
+                - xray:PutTraceSegments
+                - xray:PutTelemetryRecords
+              Resource: '*'
+      Events:
+        ChatApi:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref VirtualMeApi
+            Path: /chat
+            Method: POST
+    Metadata:
+      BuildMethod: python3.11
+
+  VirtualMeFunctionLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: /aws/lambda/virtual-me-v2
+      RetentionInDays: !Ref LogRetentionDays
+
+  VirtualMeApi:
+    Type: AWS::Serverless::HttpApi
+    Properties:
+      StageName: prod
+      Description: Virtual Me v2 HTTP API
+      CorsConfiguration:
+        AllowOrigins:
+          - !Sub https://${FrontendSubdomain}.${DomainName}
+        AllowMethods:
+          - POST
+          - OPTIONS
+        AllowHeaders:
+          - content-type
+        MaxAge: 300
+      AccessLogSettings:
+        DestinationArn: !GetAtt ApiLogGroup.Arn
+        Format: '{"requestId":"$context.requestId","ip":"$context.identity.sourceIp","requestTime":"$context.requestTime","httpMethod":"$context.httpMethod","routeKey":"$context.routeKey","status":"$context.status","protocol":"$context.protocol","responseLength":"$context.responseLength"}'
+      DefaultRouteSettings:
+        ThrottlingBurstLimit: 20
+        ThrottlingRateLimit: 10
+      Tags:
+        Project: VirtualMe
+
+  ApiLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: /aws/apigateway/virtual-me-v2-api
+      RetentionInDays: !Ref LogRetentionDays
+
+  ApiDomainName:
+    Type: AWS::ApiGatewayV2::DomainName
+    Properties:
+      DomainName: !Sub ${ApiSubdomain}.${DomainName}
+      DomainNameConfigurations:
+        - CertificateArn: !Ref ApiCertificateArn
+          EndpointType: REGIONAL
+          SecurityPolicy: TLS_1_2
+      Tags:
+        Project: VirtualMe
+
+  ApiMapping:
+    Type: AWS::ApiGatewayV2::ApiMapping
+    Properties:
+      ApiId: !Ref VirtualMeApi
+      DomainName: !Ref ApiDomainName
+      Stage: !Ref VirtualMeApi.Stage
+
+  ApiDnsRecord:
+    Type: AWS::Route53::RecordSet
+    Properties:
+      HostedZoneId: !Ref Route53ZoneId
+      Name: !Sub ${ApiSubdomain}.${DomainName}
+      Type: A
+      AliasTarget:
+        DNSName: !GetAtt ApiDomainName.RegionalDomainName
+        HostedZoneId: !GetAtt ApiDomainName.RegionalHostedZoneId
+        EvaluateTargetHealth: false
+
+Outputs:
+  FunctionName:
+    Description: Lambda function name
+    Value: !Ref VirtualMeFunction
+    Export:
+      Name: !Sub ${AWS::StackName}-FunctionName
+  
+  FunctionArn:
+    Description: Lambda function ARN
+    Value: !GetAtt VirtualMeFunction.Arn
+    Export:
+      Name: !Sub ${AWS::StackName}-FunctionArn
+  
+  ApiId:
+    Description: HTTP API ID
+    Value: !Ref VirtualMeApi
+    Export:
+      Name: !Sub ${AWS::StackName}-ApiId
+  
+  ApiEndpoint:
+    Description: HTTP API endpoint URL
+    Value: !Sub https://${ApiSubdomain}.${DomainName}/chat
+    Export:
+      Name: !Sub ${AWS::StackName}-ApiEndpoint

@@ -225,9 +225,15 @@ src/knowledge_base/
 .aws-sam/
 sam/.aws-sam/
 
+# Swift build artifacts
+swift/.build/
+*.swiftpm
+.DS_Store
+
 # LocalStack
 volume/
 
 # IDE
 .vscode/
 .idea/
+sam/env.json
