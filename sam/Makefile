@@ -1,4 +1,4 @@
-.PHONY: build deploy deploy-frontend deploy-all validate logs logs-api clean delete help upload-kb start-ingestion ingest ingestion-status run-local test-local cold-start-metrics
+.PHONY: build deploy deploy-frontend deploy-all validate logs logs-api clean delete help upload-kb start-ingestion ingest ingestion-status run-local test-local cold-start-metrics memory-metrics
 
 # Default target
 help:
@@ -14,6 +14,7 @@ help:
 	@echo "  make logs            - Tail Lambda function logs"
 	@echo "  make logs-api        - Tail API Gateway logs"
 	@echo "  make cold-start-metrics - Show cold start statistics"
+	@echo "  make memory-metrics  - Show memory usage statistics"
 	@echo "  make clean           - Remove build artifacts"
 	@echo "  make delete          - Delete the entire SAM stack"
 	@echo ""
@@ -30,15 +31,15 @@ build:
 
 # Run Lambda locally for development
 run-local:
-	cd ../swift && KNOWLEDGE_BASE_ID=RPXCA7UUQN LLM_MODEL=nova-2-lite LLM_TEMPERATURE=0.1 swift run
+	cd ../swift && LOCAL_LAMBDA_SERVER_INVOCATION_PORT=7001 KNOWLEDGE_BASE_ID=RPXCA7UUQN LLM_MODEL=nova-2-lite LLM_TEMPERATURE=0.1 swift run
 
 # Test local Lambda with sample request (run-local must be running)
 test-local:
 	./scripts/test-local.sh
 
-# Deploy SAM stack
+# Deploy SAM stack (requires sam build for nested stacks)
 deploy:
-	sam deploy
+	sam build && sam deploy
 
 # Deploy with guided prompts (first-time deployment)
 deploy-guided:
@@ -119,6 +120,18 @@ cold-start-metrics:
 		--start-time $$(date -u -v-7d +%s) \
 		--end-time $$(date -u +%s) \
 		--query-string 'fields @initDuration, @duration, @memorySize | filter @type = "REPORT" and ispresent(@initDuration) | stats avg(@initDuration) as avgColdStart, max(@initDuration) as maxColdStart, min(@initDuration) as minColdStart, pct(@initDuration, 50) as p50ColdStart, pct(@initDuration, 99) as p99ColdStart, count() as totalColdStarts' \
+		--query 'queryId' --output text) && \
+	sleep 3 && \
+	aws logs get-query-results --query-id $$QUERY_ID --output table
+
+# Show memory usage metrics from CloudWatch Logs
+memory-metrics:
+	@echo "Fetching memory usage from last 7 days..."
+	@QUERY_ID=$$(aws logs start-query \
+		--log-group-name /aws/lambda/virtual-me-v2 \
+		--start-time $$(date -u -v-7d +%s) \
+		--end-time $$(date -u +%s) \
+		--query-string 'fields @timestamp, @memorySize, @maxMemoryUsed | filter @type = "REPORT" | stats avg(@maxMemoryUsed) as avgMemoryUsed, max(@maxMemoryUsed) as maxMemoryUsed, min(@maxMemoryUsed) as minMemoryUsed, avg(@memorySize) as allocatedMemory' \
 		--query 'queryId' --output text) && \
 	sleep 3 && \
 	aws logs get-query-results --query-id $$QUERY_ID --output table

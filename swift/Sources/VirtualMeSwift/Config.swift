@@ -2,18 +2,14 @@ import Foundation
 import SotoCore
 
 enum Environment {
-    static var knowledgeBaseId: String {
-        ProcessInfo.processInfo.environment["KNOWLEDGE_BASE_ID"] ?? ""
-    }
+    static let knowledgeBaseId: String = ProcessInfo.processInfo.environment["KNOWLEDGE_BASE_ID"] ?? ""
 
-    static var llmModel: String {
+    static let llmModel: String = {
         let alias = ProcessInfo.processInfo.environment["LLM_MODEL"] ?? "nova-2-lite"
         return bedrockModels[alias] ?? alias
-    }
+    }()
 
-    static var llmTemperature: Double {
-        Double(ProcessInfo.processInfo.environment["LLM_TEMPERATURE"] ?? "0.1") ?? 0.1
-    }
+    static let llmTemperature: Double = Double(ProcessInfo.processInfo.environment["LLM_TEMPERATURE"] ?? "0.1") ?? 0.1
 
     private static let bedrockModels: [String: String] = [
         "nova-2-lite": "eu.amazon.nova-2-lite-v1:0",
@@ -23,7 +19,37 @@ enum Environment {
 
 // AWS Configuration
 let awsRegion: Region = .euwest3
-let maxTokens = 4096
+
+// Validation Configuration
+enum ValidationLimits {
+    static let maxConversationLength = 100  // Maximum messages in a conversation
+    static let maxMessageLength = 5000      // Maximum characters in a single message
+    static let recentMessageLimit = 20      // Number of recent messages to include
+}
+
+// Bedrock Configuration
+enum BedrockConfig {
+    static let maxTokens = 4096
+    static let numberOfResults = 3
+}
+
+// Meta Question Detection
+enum MetaDetection {
+    static let triggers = [
+        "how were you built",
+        "how were you implemented",
+        "how does this chatbot work",
+        "what technology powers you"
+    ]
+
+    static let response = """
+        I'm Virtual Me, a RAG-powered chatbot representing J. Lemaire. \
+        I'm built with Swift on AWS Lambda, S3 Vectors, Bedrock Knowledge Base, \
+        and Amazon Bedrock (Nova 2 Lite model). When you ask a question, \
+        Bedrock retrieves relevant sections from Jeremy's resume using semantic search, \
+        then I generate grounded responses to prevent hallucinations.
+        """
+}
 
 // System Prompt
 let systemPrompt = """

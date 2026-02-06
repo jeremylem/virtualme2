@@ -15,7 +15,7 @@ A "Virtual Clone" chatbot that answers questions about you using **Retrieval Aug
 
 - **S3 Vectors**: Native vector storage eliminates custom DynamoDB similarity search
 - **Swift Runtime**: Measured cold start time of **~190ms** (21x faster than v1.0's 4s)
-- **Memory Optimized**: 256MB memory footprint (50% reduction from 512MB)
+- **Memory Optimized**: 128MB memory footprint (75% reduction from 512MB)
 - **Simplified Architecture**: Bedrock Knowledge Base handles ingestion and retrieval automatically
 - **Cost Optimized**: 50% reduction in Lambda costs, no DynamoDB scan operations
 
@@ -42,7 +42,7 @@ Version 2.0 dramatically simplifies the codebase by leveraging managed AWS servi
 | **Infrastructure Code** | 911 lines (Terraform) | 714 lines (SAM) | **-22%** |
 | **Total Lines** | 2,399 | 919 | **-62%** |
 | **Cold Start Time** | ~4000ms | ~190ms | **-95%** |
-| **Memory Usage** | 512MB | 256MB | **-50%** |
+| **Memory Usage** | 512MB | 128MB | **-75%** |
 
 **What was removed:**
 - Custom DynamoDB vector store implementation (~400 lines)
@@ -102,7 +102,7 @@ make cold-start-metrics
 > Native vector storage with automatic indexing and similarity search. Zero operational overhead, sub-100ms retrieval latency.
 >
 > **Swift for Ultra-Fast Cold Starts**
-> Swift runtime achieves measured cold starts of ~190ms (21x faster than Python v1.0). Compiled binary with minimal dependencies and efficient memory usage (256MB).
+> Swift runtime achieves measured cold starts of ~190ms (21x faster than Python v1.0). Compiled binary with minimal dependencies and efficient memory usage (128MB).
 >
 > **Bedrock Knowledge Base**
 > Managed ingestion pipeline automatically chunks documents, generates embeddings, and syncs to S3 Vectors.

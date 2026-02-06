@@ -6,6 +6,10 @@ Resources:
     Type: AWS::S3::Bucket
     Properties:
       BucketName: !Sub virtual-me-v2-kb-prod-${AWS::AccountId}
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault:
+              SSEAlgorithm: AES256
       PublicAccessBlockConfiguration:
         BlockPublicAcls: true
         BlockPublicPolicy: true
