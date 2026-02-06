@@ -350,10 +350,10 @@ Version 2.0 eliminates most unit tests because:
 - Error handling and logging
 - Cold start performance
 
-**For production, consider adding:**
-- Load testing with [Artillery](https://www.artillery.io/) or [k6](https://k6.io/)
-- Synthetic monitoring with [CloudWatch Synthetics](https://docs.aws.amazon.com/AmazonCloudWatch/latest/monitoring/CloudWatch_Synthetics_Canaries.html)
-- Bedrock model evaluation with human feedback
+**Swift Package Dependencies:**
+- [swift-aws-lambda-runtime](https://github.com/awslabs/swift-aws-lambda-runtime) (2.5.3+) - AWS Lambda runtime for Swift
+- [swift-aws-lambda-events](https://github.com/swift-server/swift-aws-lambda-events) (1.5.0+) - API Gateway event types
+- [soto](https://github.com/soto-project/soto) (7.12.0+) - AWS SDK for Swift (Bedrock services)
 
 ---
 
