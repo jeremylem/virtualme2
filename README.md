@@ -233,6 +233,130 @@ For this serverless-first project, SAM provides the best developer experience.
 
 ---
 
+## Testing
+
+Version 2.0 focuses on integration testing with real AWS services rather than extensive unit tests, given the simplified architecture.
+
+### Local Testing
+
+The Swift AWS Lambda Runtime automatically starts a local HTTP server when not running in a Lambda execution environment.
+
+**Start the local server:**
+```bash
+cd sam
+make run-local
+```
+
+This runs `swift run` which starts a local server on `http://127.0.0.1:7000/invoke` connected to your actual Bedrock Knowledge Base.
+
+**Test with sample requests:**
+```bash
+# Default question
+make test-local
+
+# Custom question
+./scripts/test-local.sh "What are your key accomplishments?"
+```
+
+**Manual curl test:**
+```bash
+curl -v -X POST http://127.0.0.1:7000/invoke \
+  -H "Content-Type: application/json" \
+  -d @- << 'EOF'
+{
+  "version": "2.0",
+  "routeKey": "POST /chat",
+  "rawPath": "/chat",
+  "headers": {"content-type": "application/json"},
+  "requestContext": {
+    "http": {"method": "POST", "path": "/chat"}
+  },
+  "body": "{\"messages\":[{\"role\":\"user\",\"text\":\"What is your experience?\"}]}"
+}
+EOF
+```
+
+**Customize local server (optional):**
+```bash
+# Change port
+LOCAL_LAMBDA_PORT=8080 swift run
+
+# Change host
+LOCAL_LAMBDA_HOST=0.0.0.0 swift run
+
+# Custom endpoint (for AWS Lambda Runtime Interface Emulator)
+LOCAL_LAMBDA_INVOCATION_ENDPOINT=/2015-03-31/functions/function/invocations swift run
+```
+
+### Testing Deployed API
+
+**Test production endpoint:**
+```bash
+curl -X POST https://api.lemaire.tel/chat \
+  -H "Content-Type: application/json" \
+  -d '{
+    "messages": [
+      {"role": "user", "text": "What is your experience with AWS?"}
+    ]
+  }'
+```
+
+**Monitor retrieval quality:**
+```bash
+make logs
+
+# Look for:
+# "Retrieved 3 chunks"
+# "Model: eu.amazon.nova-2-lite-v1:0"
+# "Response: 245 chars"
+```
+
+### Performance Testing
+
+**Measure cold starts:**
+```bash
+make cold-start-metrics
+```
+
+Returns CloudWatch statistics from the last 7 days:
+- Average, min, max cold start times
+- P50 and P99 percentiles
+- Total cold start count
+
+**Monitor warm vs cold invocations:**
+```bash
+make logs
+# @initDuration present = cold start
+# @initDuration absent = warm invocation
+```
+
+### Testing Strategy
+
+Version 2.0 eliminates most unit tests because:
+- **86% less code** to test (205 lines vs 1,488)
+- **Managed services** (Bedrock KB, S3 Vectors) are tested by AWS
+- **Integration tests** validate the full RAG pipeline end-to-end
+
+**What v1.0 tested (no longer needed):**
+- Custom vector store similarity search (~150 lines of test code)
+- Embedding generation and normalization
+- LangGraph state transitions
+- DynamoDB pagination logic
+
+**What v2.0 validates:**
+- API Gateway → Lambda integration (local + deployed)
+- Bedrock Knowledge Base retrieval
+- LLM response generation
+- Error handling and logging
+- Cold start performance
+
+**For production, consider adding:**
+- Load testing with [Artillery](https://www.artillery.io/) or [k6](https://k6.io/)
+- Synthetic monitoring with [CloudWatch Synthetics](https://docs.aws.amazon.com/AmazonCloudWatch/latest/monitoring/CloudWatch_Synthetics_Canaries.html)
+- Bedrock model evaluation with human feedback
+
+---
+
 ## Configuration
 
 | Variable | Default | Description |
