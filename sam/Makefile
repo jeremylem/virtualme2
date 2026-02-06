@@ -1,4 +1,4 @@
-.PHONY: build deploy deploy-frontend deploy-all validate logs logs-api clean delete help upload-kb start-ingestion ingest ingestion-status run-local test-local cold-start-metrics memory-metrics
+.PHONY: build deploy deploy-frontend deploy-all validate logs logs-api logs-direct clean delete help upload-kb start-ingestion ingest ingestion-status run-local test-local cold-start-metrics memory-metrics
 
 # Default target
 help:
@@ -11,8 +11,9 @@ help:
 	@echo "  make deploy-frontend - Sync frontend files to S3 and invalidate CloudFront"
 	@echo "  make deploy-all      - Build, deploy stack, and deploy frontend"
 	@echo "  make validate        - Validate SAM template"
-	@echo "  make logs            - Tail Lambda function logs"
-	@echo "  make logs-api        - Tail API Gateway logs"
+	@echo "  make logs            - Tail Lambda function logs (nested stack path)"
+	@echo "  make logs-direct     - Tail Lambda logs using AWS CLI directly (recommended)"
+	@echo "  make logs-api        - Tail API Gateway logs (requires access logging enabled)"
 	@echo "  make cold-start-metrics - Show cold start statistics"
 	@echo "  make memory-metrics  - Show memory usage statistics"
 	@echo "  make clean           - Remove build artifacts"
@@ -31,7 +32,7 @@ build:
 
 # Run Lambda locally for development
 run-local:
-	cd ../swift && LOCAL_LAMBDA_SERVER_INVOCATION_PORT=7001 KNOWLEDGE_BASE_ID=RPXCA7UUQN LLM_MODEL=nova-2-lite LLM_TEMPERATURE=0.1 swift run
+	cd ../swift && LOCAL_LAMBDA_SERVER_INVOCATION_PORT=7001 KNOWLEDGE_BASE_ID=JF4H5OG1BJ LLM_MODEL=nova-2-lite LLM_TEMPERATURE=0.1 swift run
 
 # Test local Lambda with sample request (run-local must be running)
 test-local:
@@ -58,11 +59,18 @@ validate:
 
 # Tail Lambda function logs
 logs:
-	sam logs -n VirtualMeFunction --stack-name virtual-me-v2 --tail
+	sam logs -n ComputeStack/VirtualMeFunction --stack-name virtual-me-v2 --tail
 
 # Tail API Gateway logs
 logs-api:
-	aws logs tail /aws/apigateway/virtual-me-v2-api --follow
+	@API_ID=$$(aws cloudformation describe-stacks --stack-name virtual-me-v2 --query 'Stacks[0].Outputs[?OutputKey==`ApiId`].OutputValue' --output text) && \
+	echo "Tailing logs for API: $$API_ID" && \
+	aws logs tail /aws/vendedlogs/apis/$$API_ID --follow --format short 2>/dev/null || \
+	echo "Note: API Gateway access logging may not be enabled. Check the API Gateway console to enable it."
+
+# Tail Lambda logs using AWS CLI directly (alternative)
+logs-direct:
+	aws logs tail /aws/lambda/virtual-me-v2 --follow --format short
 
 # Remove build artifacts
 clean:
