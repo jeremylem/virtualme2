@@ -350,11 +350,6 @@ Version 2.0 eliminates most unit tests because:
 - Error handling and logging
 - Cold start performance
 
-**Swift Package Dependencies:**
-- [swift-aws-lambda-runtime](https://github.com/awslabs/swift-aws-lambda-runtime) (2.5.3+) - AWS Lambda runtime for Swift
-- [swift-aws-lambda-events](https://github.com/swift-server/swift-aws-lambda-events) (1.5.0+) - API Gateway event types
-- [soto](https://github.com/soto-project/soto) (7.12.0+) - AWS SDK for Swift (Bedrock services)
-
 ---
 
 ## Configuration
@@ -425,6 +420,21 @@ Version 2.0 simplifies the architecture:
 - Bedrock Knowledge Base
 - Swift runtime (21x faster cold starts)
 - Automatic ingestion pipeline
+
+---
+
+## Swift Lambda Resources
+
+**Package Dependencies:**
+- [swift-aws-lambda-runtime](https://github.com/awslabs/swift-aws-lambda-runtime) (2.5.3+) - AWS Lambda runtime for Swift
+- [swift-aws-lambda-events](https://github.com/swift-server/swift-aws-lambda-events) (1.5.0+) - API Gateway event types
+- [soto](https://github.com/soto-project/soto) (7.12.0+) - AWS SDK for Swift (Bedrock services)
+
+**Additional Resources:**
+- [Swift AWS Lambda Runtime Documentation](https://swiftpackageindex.com/awslabs/swift-aws-lambda-runtime/documentation)
+- [AWS Lambda Custom Runtimes](https://docs.aws.amazon.com/lambda/latest/dg/runtimes-custom.html)
+- [Swift Server Workgroup](https://www.swift.org/sswg/)
+- [Deploying Swift on AWS Lambda](https://docs.aws.amazon.com/lambda/latest/dg/lambda-swift.html)
 
 ---
 
